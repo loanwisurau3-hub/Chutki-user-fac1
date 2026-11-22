@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "66128890021",
+    "firebase_url": "https://chutki-production-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "chutki-production",
+    "storage_bucket": "chutki-production.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:66128890021:android:c206602da6e92b163a254c",
+        "android_client_info": {
+          "package_name": "com.chutki.user"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "66128890021-phd0m3r1iih91kmqts51m7f9fa5doccm.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBdEVEy3maol-2ieEnWb19ghw5w-j6rXPY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "66128890021-phd0m3r1iih91kmqts51m7f9fa5doccm.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
