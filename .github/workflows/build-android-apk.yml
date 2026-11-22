@@ -6,13 +6,13 @@ on:
   workflow_dispatch:
     inputs:
       build_type:
-        description: 'APK Type (debug = instant test, release = signed)'
+        description: 'APK Type (release = signed for Google Sign-In, debug = test only)'
         required: true
-        default: 'debug'
+        default: 'release'
         type: choice
         options:
-          - debug
           - release
+          - debug
 
 jobs:
   build-apk:
@@ -33,6 +33,17 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      - name: Check Signing Keystore Secret
+        id: check_keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "has_keystore=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_keystore=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install Dependencies
         run: |
           npm install --legacy-peer-deps
@@ -50,6 +61,24 @@ jobs:
           fi
           if [ -f "google-services.json" ]; then
             cp google-services.json android/app/google-services.json
+            echo "Copied google-services.json to android/app/google-services.json"
+            node -e '
+              const gs = JSON.parse(require("fs").readFileSync("google-services.json", "utf8"));
+              const client = gs.client && gs.client[0];
+              const pkg = client?.client_info?.android_client_info?.package_name;
+              const oauths = client?.oauth_client || [];
+              const hasAndroidOauth = oauths.some(c => c.client_type === 1);
+              const hasWebOauth = oauths.some(c => c.client_type === 3);
+              console.log("Firebase package:", pkg);
+              console.log("Has Android OAuth (SHA-1 linked):", hasAndroidOauth);
+              console.log("Has Web OAuth (client_type 3):", hasWebOauth);
+              if (!hasAndroidOauth) {
+                console.log("::warning::google-services.json does NOT have an Android SHA-1 OAuth client yet! Add SHA-1 in Firebase Console and re-download google-services.json.");
+              }
+            '
+          else
+            echo "::error::google-services.json not found in repository root!"
+            exit 1
           fi
 
       - name: Add Android Permissions (GPS, Notifications, Mic, Vibrate)
@@ -79,41 +108,53 @@ jobs:
       - name: Sync Capacitor Assets & Plugins
         run: npx cap sync android
 
-      - name: Build Debug APK
-        if: ${{ github.event.inputs.build_type != 'release' }}
+      - name: Configure Release Signing & Build Signed Release APK
+        if: ${{ github.event.inputs.build_type != 'debug' && steps.check_keystore.outputs.has_keystore == 'true' }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > android/app/release-keystore.jks
+
+          node -e '
+            const fs = require("fs");
+            const gradlePath = "android/app/build.gradle";
+            let gradle = fs.readFileSync(gradlePath, "utf8");
+            if (!gradle.includes("signingConfigs")) {
+              gradle = gradle.replace(
+                /buildTypes\s*\{\s*release\s*\{/,
+                `signingConfigs {\n        release {\n            storeFile file("release-keystore.jks")\n            storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")\n            keyAlias System.getenv("ANDROID_KEY_ALIAS")\n            keyPassword System.getenv("ANDROID_KEY_PASSWORD")\n        }\n    }\n    buildTypes {\n        release {\n            signingConfig signingConfigs.release`
+              );
+              fs.writeFileSync(gradlePath, gradle, "utf8");
+            }
+          '
+
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease
+
+          echo "=== SIGNED APK FINGERPRINTS (Must match Firebase Console) ==="
+          keytool -printcert -jarfile app/build/outputs/apk/release/app-release.apk | grep -E "SHA1:|SHA256:" || true
+
+      - name: Upload Signed Release APK
+        if: ${{ github.event.inputs.build_type != 'debug' && steps.check_keystore.outputs.has_keystore == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Chutki-Release-APK
+          path: android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Build Debug APK (Fallback)
+        if: ${{ github.event.inputs.build_type == 'debug' || steps.check_keystore.outputs.has_keystore != 'true' }}
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
 
       - name: Upload Debug APK
-        if: ${{ github.event.inputs.build_type != 'release' }}
+        if: ${{ github.event.inputs.build_type == 'debug' || steps.check_keystore.outputs.has_keystore != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: Chutki-Debug-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
-
-      - name: Build Release APK (Unsigned)
-        if: ${{ github.event.inputs.build_type == 'release' }}
-        run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleRelease
-
-      - name: Sign Release APK
-        if: ${{ github.event.inputs.build_type == 'release' }}
-        id: sign_app
-        uses: r0adkll/sign-android-release@v1
-        with:
-          releaseDirectory: android/app/build/outputs/apk/release
-          signingKeyBase64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          alias: ${{ secrets.ANDROID_KEY_ALIAS }}
-          keyStorePassword: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
-
-      - name: Upload Signed Release APK
-        if: ${{ github.event.inputs.build_type == 'release' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: Chutki-Release-APK
-          path: ${{ steps.sign_app.outputs.signedReleaseFile }}
