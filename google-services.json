@@ -15,6 +15,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "66128890021-p4bits66ascui5iacmfrra5jm1di3s0p.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.chutki.user",
+            "certificate_hash": "e039d20fdb15496636add0713685ecd8b4f11792"
+          }
+        },
+        {
           "client_id": "66128890021-phd0m3r1iih91kmqts51m7f9fa5doccm.apps.googleusercontent.com",
           "client_type": 3
         }
